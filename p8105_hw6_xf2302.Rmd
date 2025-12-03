@@ -54,6 +54,7 @@ baltimore_results
 ```
 
 For Baltimore, MD, the adjusted odds ratio comparing male to female victims is 0.426, with a 95% confidence interval of 0.324 to 0.558. This means that, after adjusting for victim age and race, homicides involving male victims are significantly less likely to be solved than those involving female victims. Because the confidence interval lies entirely below 1, the association is statistically meaningful and indicates a substantially lower clearance rate for male-victim homicides in Baltimore.
+
 # Fit glm for each city and extract OR
 ```{r}
 city_or_results =
@@ -181,83 +182,134 @@ ratio_ci
 
 The bootstrap distribution of $\hat{r}^{2}$ is tightly concentrated around 0.94 with a narrow and nearly symmetric spread, indicating that the linear regression model explains a consistent proportion of variability in *tmax* even under repeated resampling.
 
-The 95% bootstrap confidence interval ranges from **`r round(r2_ci$low, 3)` to `r round(r2_ci$high, 3)`**, showing that the model fit remains stable across bootstrap samples.
+The 95% bootstrap confidence interval ranges from `r round(r2_ci$low, 3)` to `r round(r2_ci$high, 3)`, showing that the model fit remains stable across bootstrap samples.
 
 ## Distribution of $\hat{\beta}_{1}/\hat{\beta}_{2}$
 
 In contrast, the bootstrap distribution of the ratio $\hat{\beta}_{1}/\hat{\beta}_{2}$ is much wider and strongly left-skewed because the precipitation coefficient $\hat{\beta}_{2}$ is very small and varies near zero, making the ratio highly unstable under resampling.
 
-The 95% bootstrap confidence interval is **[`r round(ratio_ci$low, 1)`, `r round(ratio_ci$high, 1)`]**, reflecting substantial uncertainty and indicating that this ratio is not a reliable or interpretable summary of the model.
+The 95% bootstrap confidence interval is [`r round(ratio_ci$low, 1)`, `r round(ratio_ci$high, 1)`], reflecting substantial uncertainty and indicating that this ratio is not a reliable or interpretable summary of the model.
 
 # Problem 3
-
+# Load and clean the data
 ```{r}
-birth <- 
-  read_csv("Data/birthweight.csv") %>% 
+birthweight = 
+  read_csv("https://p8105.com/data/birthweight.csv") %>%
   janitor::clean_names() %>%
   mutate(
-    babysex = factor(babysex, labels = c("male", "female")),
+    babysex = factor(babysex, levels = c(1, 2), labels = c("male", "female")),
     frace   = factor(frace),
     mrace   = factor(mrace),
-    malform = factor(malform, labels = c("absent", "present"))
-  ) %>%
-  drop_na()
-```
-```{r}
-model_1 <- 
-  lm(bwt ~ gaweeks + bhead + blength + delwt + ppwt + fincome + smoken, 
-     data = birth)
+    malform = factor(malform, levels = c(0, 1), labels = c("absent", "present"))
+  )
 
-summary(model_1)
+# Check missing data
+sum(is.na(birthweight))
 ```
+After cleaning and formatting the dataset, all variables are prepared for regression analysis, and no missing data were detected.
+
+# Proposed model
 ```{r}
-birth %>%
-  add_predictions(model_1) %>%
-  add_residuals(model_1) %>%
+model_prop = 
+  lm(bwt ~ blength + bhead + gaweeks + babysex + wtgain + ppbmi + smoken,
+     data = birthweight)
+
+tidy(model_prop)
+```
+This proposed model includes infant size at birth (length and head circumference), gestational age, maternal weight-related variables, smoking, and sex. These predictors were selected based on domain knowledge and their expected relevance to birthweight.
+
+# Residuals vs Fitted Values
+```{r}
+birth_plot_df =
+  birthweight %>%
+  add_predictions(model_prop) %>%
+  add_residuals(model_prop)
+
+birth_plot_df %>%
   ggplot(aes(x = pred, y = resid)) +
-  geom_point(alpha = 0.3) +
-  geom_hline(yintercept = 0, color = "red") +
+  geom_point(alpha = 0.25,) +
+  geom_hline(yintercept = 0, color = "lightpink", linetype = "dashed", linewidth = 1) +
+  geom_smooth(se = FALSE, color = "lightskyblue", linewidth = 1.2) +
   labs(
-    x = "Fitted values",
-    y = "Residuals",
-    title = "Residuals vs Fitted for Model 1"
+    title = "Residuals vs Fitted Values (Proposed Model)",
+    x = "Fitted Birthweight (grams)",
+    y = "Residuals"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
   )
 ```
-```{r}
-model_2 <- lm(bwt ~ blength + gaweeks, data = birth)
 
+Residuals are centered around zero with some mild curvature, suggesting minor nonlinear patterns not fully captured by the model.
+
+# Model 1: Birth Length and Gestational Age as Predictors
+```{r}
+model_main = lm(bwt ~ blength + gaweeks, data = birthweight)
 ```
 
+# Model 2: Three-Way Interaction Among Head Circumference, Length, and Sex
 ```{r}
-model_3 <- lm(bwt ~ bhead * blength * babysex, data = birth)
+model_inter = lm(bwt ~ bhead * blength * babysex, data = birthweight)
 ```
 
-
+# Cross-Validation: Model Fitting and RMSE Computation
 ```{r}
 set.seed(123)
 
-cv_df <- crossv_mc(birth, 100)
+cv_df = crossv_mc(birthweight, 200)
 
-cv_results <- cv_df %>%
+cv_results =
+  cv_df %>%
   mutate(
-    model_1 = map(train, ~ lm(bwt ~ gaweeks + bhead + blength + delwt + ppwt + 
-                                fincome + smoken, data = .x)),
-    model_2 = map(train, ~ lm(bwt ~ blength + gaweeks, data = .x)),
-    model_3 = map(train, ~ lm(bwt ~ bhead * blength * babysex, data = .x)),
-    
-    rmse_1 = map2_dbl(model_1, test, ~ rmse(model = .x, data = .y)),
-    rmse_2 = map2_dbl(model_2, test, ~ rmse(model = .x, data = .y)),
-    rmse_3 = map2_dbl(model_3, test, ~ rmse(model = .x, data = .y))
+    train = map(train, as_tibble),
+    test  = map(test,  as_tibble),
+
+    fit_prop = map(train, ~ lm(bwt ~ blength + bhead + gaweeks + babysex +
+                                 wtgain + ppbmi + smoken, data = .x)),
+    fit_main = map(train, ~ lm(bwt ~ blength + gaweeks, data = .x)),
+    fit_inter = map(train, ~ lm(bwt ~ bhead * blength * babysex, data = .x)),
+
+    rmse_prop  = map2_dbl(fit_prop,  test, ~ rmse(.x, .y)),
+    rmse_main  = map2_dbl(fit_main,  test, ~ rmse(.x, .y)),
+    rmse_inter = map2_dbl(fit_inter, test, ~ rmse(.x, .y))
   ) %>%
   select(starts_with("rmse"))
 ```
-
+# Summary of Cross-Validated RMSE
 ```{r}
-cv_results %>% 
+cv_summary =
+  cv_results %>%
   summarize(
-    model_1 = mean(rmse_1),
-    model_2 = mean(rmse_2),
-    model_3 = mean(rmse_3)
+    Proposed     = mean(rmse_prop),
+    Main_Effects = mean(rmse_main),
+    Interaction  = mean(rmse_inter)
   )
+
+cv_summary
 ```
+
+# Cross-Validated RMSE Distribution
+```{r}
+cv_results %>%
+  pivot_longer(everything(),
+               names_to = "model",
+               values_to = "rmse",
+               names_prefix = "rmse_") %>%
+  mutate(model = recode(model,
+                        "prop" = "Proposed Model",
+                        "main" = "Main Effects",
+                        "inter" = "Interactions")) %>%
+  ggplot(aes(x = model, y = rmse, fill = model)) +
+  geom_violin(alpha = 0.5) +
+  labs(
+    title = "Cross-Validated RMSE Comparison",
+    x = "Model",
+    y = "RMSE"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
 

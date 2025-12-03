@@ -242,7 +242,7 @@ birth_plot_df %>%
   )
 ```
 
-Residuals are centered around zero with some mild curvature, suggesting minor nonlinear patterns not fully captured by the model.
+Overall, the residual plot indicates reasonably good model fit, with residuals centered around zero and no severe violations of linear model assumptions, though the slight curvature suggests that modest nonlinear patterns remain.
 
 # Model 1: Birth Length and Gestational Age as Predictors
 ```{r}
@@ -311,5 +311,7 @@ cv_results %>%
   theme_minimal() +
   theme(legend.position = "none")
 ```
+
+Based on the comparison of three candidate models, the proposed model consistently demonstrated the best predictive performance. Monte Carlo cross-validation with 200 splits showed that it achieved the lowest mean RMSE and the most stable error distribution. The main-effects model underperformed due to omitted predictors, while the full interaction model exhibited greater error and variability, indicating overfitting. Overall, the proposed model provides the strongest balance of accuracy and interpretability for predicting birthweight.
 
 

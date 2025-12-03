@@ -184,9 +184,9 @@ The bootstrap distribution of $\hat{r}^{2}$ is tightly concentrated around 0.94 
 
 The 95% bootstrap confidence interval ranges from `r round(r2_ci$low, 3)` to `r round(r2_ci$high, 3)`, showing that the model fit remains stable across bootstrap samples.
 
-## Distribution of $\hat{\beta}_{1}$/$\hat{\beta}_{2}$
+## Distribution of β₁_hat / β₂_hat
 
-In contrast, the bootstrap distribution of the ratio $\hat{\beta}_{1}$/$\hat{\beta}_{2}$is much wider and strongly left-skewed because the precipitation coefficient $\hat{\beta}_{2}$ is very small and varies near zero, making the ratio highly unstable under resampling.
+In contrast, the bootstrap distribution of the ratio β₁_hat / β₂_hat is much wider and strongly left-skewed because the precipitation coefficient $\hat{\beta}_{2}$ is very small and varies near zero, making the ratio highly unstable under resampling.
 
 The 95% bootstrap confidence interval is [`r round(ratio_ci$low, 1)`, `r round(ratio_ci$high, 1)`], reflecting substantial uncertainty and indicating that this ratio is not a reliable or interpretable summary of the model.
 

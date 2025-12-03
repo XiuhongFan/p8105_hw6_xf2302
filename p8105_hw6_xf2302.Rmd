@@ -1,0 +1,263 @@
+---
+title: "p8105_hw6_xf2302"
+author: "Xiuhong Fan"
+date: "2025-11-30"
+output: github_document
+---
+# Problem 1
+# Load packages and read local CSV
+```{r}
+library(tidyverse)
+library(broom)
+library(purrr)
+library(modelr)
+library(forcats)
+library(rsample)
+library(p8105.datasets)
+
+homicides =
+  read_csv("Data/homicide-data.csv")
+```
+# Data cleaning
+```{r}
+homicides_clean =
+  homicides %>%
+  mutate(
+    city_state = str_c(city, state, sep = ", "),
+    solved = if_else(disposition == "Closed by arrest", 1, 0),
+    victim_age = as.numeric(victim_age)
+  ) %>%
+  filter(
+    !city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL"),
+    victim_race %in% c("White", "Black")
+  )
+```
+# Baltimore logistic regression
+```{r}
+baltimore_df =
+  homicides_clean %>%
+  filter(city_state == "Baltimore, MD")
+
+baltimore_fit =
+  glm(
+    solved ~ victim_age + victim_sex + victim_race,
+    data = baltimore_df,
+    family = binomial()
+  )
+
+baltimore_results =
+  tidy(baltimore_fit, conf.int = TRUE, exp = TRUE) %>%
+  filter(term == "victim_sexMale") %>%
+  select(estimate, conf.low, conf.high)
+
+baltimore_results
+```
+
+For Baltimore, MD, the adjusted odds ratio comparing male to female victims is 0.426, with a 95% confidence interval of 0.324 to 0.558. This means that, after adjusting for victim age and race, homicides involving male victims are significantly less likely to be solved than those involving female victims. Because the confidence interval lies entirely below 1, the association is statistically meaningful and indicates a substantially lower clearance rate for male-victim homicides in Baltimore.
+# Fit glm for each city and extract OR
+```{r}
+city_or_results =
+  homicides_clean %>%
+  nest(data = -city_state) %>%
+  mutate(
+    fit = map(
+      data,
+      ~ glm(
+          solved ~ victim_age + victim_sex + victim_race,
+          data = .x,
+          family = binomial()
+        )
+    ),
+    tidy_fit = map(fit, ~ tidy(.x, conf.int = TRUE, exp = TRUE))
+  ) %>%
+  unnest(tidy_fit) %>%
+  filter(term == "victim_sexMale") %>%
+  select(city_state, estimate, conf.low, conf.high)
+```
+# Forest plot of ORs across cities
+```{r}
+city_or_plot =
+  city_or_results %>%
+  arrange(estimate) %>%
+  mutate(city_state = factor(city_state, levels = city_state)) %>%
+  ggplot(aes(x = estimate, y = city_state)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high), height = 0.2) +
+  geom_vline(xintercept = 1, linetype = "dashed") +
+  labs(
+    x = "Adjusted Odds Ratio (Male vs Female Victims)",
+    y = "City",
+    title = "Adjusted Odds Ratios for Solving Homicides by City",
+    subtitle = "Models adjust for victim age and race"
+  ) +
+  theme(
+    axis.text.y = element_text(size = 6, colour = "black")   
+  )
+
+city_or_plot
+```
+
+Across the 50 cities, the estimated odds ratios span a broad range, indicating substantial variability in the association between victim sex and homicide clearance rates. However, most estimates fall below 1, suggesting that homicides involving male victims are generally less likely to be solved than those involving female victims after adjusting for age and race. A small number of cities have odds ratios near or above 1, although these estimates typically have wide confidence intervals, reflecting limited sample sizes or greater statistical uncertainty. Overall, the plot highlights considerable heterogeneity across cities, but the prevailing pattern is that male-victim homicides tend to exhibit lower clearance rates.
+
+# Problem 2
+
+# Functions for Model Fitting and Bootstrap Statistics
+```{r}
+fit_lm <- function(df) {
+  lm(tmax ~ tmin + prcp, data = df)
+}
+
+boot_fn <- function(df) {
+  sample_df = df %>% sample_frac(replace = TRUE)
+  fit = fit_lm(sample_df)
+  
+  r2 = glance(fit)$r.squared
+  
+  coef_df = tidy(fit)
+  beta1 = coef_df$estimate[coef_df$term == "tmin"]
+  beta2 = coef_df$estimate[coef_df$term == "prcp"]
+  
+  ratio = beta1 / beta2
+  
+  tibble(r2 = r2, ratio = ratio)
+}
+
+set.seed(123)
+
+boot_results =
+  tibble(rep = 1:5000) %>%
+  mutate(
+    out = map(rep, ~ boot_fn(weather_df))
+  ) %>%
+  unnest(out)
+```
+# Distribution plots
+```{r}
+r2_plot =
+  boot_results %>%
+  ggplot(aes(x = r2)) +
+  geom_histogram(bins = 40, fill = "skyblue", color = "white") +
+  labs(
+    title = "Bootstrap Distribution of hat(r)^2",
+    x = expression(hat(r)^2),
+    y = "Count"
+  )
+
+ratio_plot =
+  boot_results %>%
+  ggplot(aes(x = ratio)) +
+  geom_histogram(bins = 40, fill = "lightgreen", color = "white") +
+  labs(
+    title = "Bootstrap Distribution of hat(beta)[1] / hat(beta)[2]",
+    x = expression(hat(beta)[1] / hat(beta)[2]),
+    y = "Count"
+  )
+
+r2_plot
+ratio_plot
+```
+
+# 95% confidence intervals
+```{r}
+r2_ci =
+  boot_results %>%
+  summarize(
+    low = quantile(r2, 0.025),
+    high = quantile(r2, 0.975)
+  )
+
+ratio_ci =
+  boot_results %>%
+  summarize(
+    low = quantile(ratio, 0.025),
+    high = quantile(ratio, 0.975)
+  )
+
+r2_ci
+ratio_ci
+```
+
+## Distribution of $\hat{r}^{2}$
+
+The bootstrap distribution of $\hat{r}^{2}$ is tightly concentrated around 0.94 with a narrow and nearly symmetric spread, indicating that the linear regression model explains a consistent proportion of variability in *tmax* even under repeated resampling.
+
+The 95% bootstrap confidence interval ranges from **`r round(r2_ci$low, 3)` to `r round(r2_ci$high, 3)`**, showing that the model fit remains stable across bootstrap samples.
+
+## Distribution of $\hat{\beta}_{1}/\hat{\beta}_{2}$
+
+In contrast, the bootstrap distribution of the ratio $\hat{\beta}_{1}/\hat{\beta}_{2}$ is much wider and strongly left-skewed because the precipitation coefficient $\hat{\beta}_{2}$ is very small and varies near zero, making the ratio highly unstable under resampling.
+
+The 95% bootstrap confidence interval is **[`r round(ratio_ci$low, 1)`, `r round(ratio_ci$high, 1)`]**, reflecting substantial uncertainty and indicating that this ratio is not a reliable or interpretable summary of the model.
+
+# Problem 3
+
+```{r}
+birth <- 
+  read_csv("Data/birthweight.csv") %>% 
+  janitor::clean_names() %>%
+  mutate(
+    babysex = factor(babysex, labels = c("male", "female")),
+    frace   = factor(frace),
+    mrace   = factor(mrace),
+    malform = factor(malform, labels = c("absent", "present"))
+  ) %>%
+  drop_na()
+```
+```{r}
+model_1 <- 
+  lm(bwt ~ gaweeks + bhead + blength + delwt + ppwt + fincome + smoken, 
+     data = birth)
+
+summary(model_1)
+```
+```{r}
+birth %>%
+  add_predictions(model_1) %>%
+  add_residuals(model_1) %>%
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.3) +
+  geom_hline(yintercept = 0, color = "red") +
+  labs(
+    x = "Fitted values",
+    y = "Residuals",
+    title = "Residuals vs Fitted for Model 1"
+  )
+```
+```{r}
+model_2 <- lm(bwt ~ blength + gaweeks, data = birth)
+
+```
+
+```{r}
+model_3 <- lm(bwt ~ bhead * blength * babysex, data = birth)
+```
+
+
+```{r}
+set.seed(123)
+
+cv_df <- crossv_mc(birth, 100)
+
+cv_results <- cv_df %>%
+  mutate(
+    model_1 = map(train, ~ lm(bwt ~ gaweeks + bhead + blength + delwt + ppwt + 
+                                fincome + smoken, data = .x)),
+    model_2 = map(train, ~ lm(bwt ~ blength + gaweeks, data = .x)),
+    model_3 = map(train, ~ lm(bwt ~ bhead * blength * babysex, data = .x)),
+    
+    rmse_1 = map2_dbl(model_1, test, ~ rmse(model = .x, data = .y)),
+    rmse_2 = map2_dbl(model_2, test, ~ rmse(model = .x, data = .y)),
+    rmse_3 = map2_dbl(model_3, test, ~ rmse(model = .x, data = .y))
+  ) %>%
+  select(starts_with("rmse"))
+```
+
+```{r}
+cv_results %>% 
+  summarize(
+    model_1 = mean(rmse_1),
+    model_2 = mean(rmse_2),
+    model_3 = mean(rmse_3)
+  )
+```
+
